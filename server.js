@@ -17,5 +17,5 @@ app.use('/api/users', usersRouter);
 app.use('/api/receipts', receiptsRouter);
 
 app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
+  console.log(`🚀 Server je pokrenut na portu ${port}`);
 });
