@@ -63,6 +63,8 @@ PUT | /:id/profile | Promena podataka profila (kontakt)
 ## ⚙️ Environment Varijable
 
 - PORT - port na kom se pokreće server na lokalu
+- NODEMAILER_MAIL - email adresa sa koje će se slati mejlovi korisnicima
+- NODEMAILER_PASSOWRD - lozinka gore navedene email adrese
 
 ## 🧩 Tech Stack
 

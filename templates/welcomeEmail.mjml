@@ -1,0 +1,74 @@
+<mjml>
+  <mj-head>
+    <mj-title>Registracija naloga</mj-title>
+    <mj-preview>Hvala Vam za prijavu na Calculus QR Code Scanner</mj-preview>
+    <mj-font
+      name="Roboto"
+      href="https://fonts.googleapis.com/css?family=Roboto:300,400,500"
+    />
+    <mj-attributes>
+      <mj-all font-family="Roboto, Helvetica, Arial, sans-serif" />
+      <mj-text font-size="16px" color="#444444" line-height="24px" />
+      <mj-button background-color="#2E58FF" color="white" font-size="16px" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f7f7f7">
+    <mj-section background-color="#ffffff" padding="20px 0">
+      <mj-column>
+        <mj-image
+          src="https://www.calculus.rs/templates/OP/skins/main/images/logo/flogo.png"
+          alt="Company Logo"
+          width="150px"
+          padding="10px 25px"
+        />
+        <mj-divider
+          border-width="1px"
+          border-style="dashed"
+          border-color="#e1e1e1"
+          padding="0 20px"
+        />
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="20px 0 10px 0">
+      <mj-column>
+        <mj-text padding="10px 25px">
+          Vaš nalog za korišćenje aplikacije Calculus QR Code Scanner je uspešno
+          registrovan.
+          <br />
+          Molimo Vas da pripremite serijske brojeve i nazive baza podataka koje
+          želite da povežete sa ovim nalogom.
+          <br />
+          Željene baze podataka možete proslediti tehničkoj podršci, ili će Vas
+          neko kontaktirati za dodatne informacije. Hvala na strpljenju.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#f5f5f5" padding="20px 0">
+      <mj-column>
+        <mj-text
+          align="center"
+          font-size="14px"
+          color="#666666"
+          padding="10px 25px"
+        >
+          Možete nas kontaktirati putem mejla
+          <a
+            href="mailto:podrska@calculus.rs"
+            style="color: #2e58ff; text-decoration: none"
+            >podrska@calculus.rs</a
+          >
+        </mj-text>
+        <mj-text
+          align="center"
+          font-size="12px"
+          color="#999999"
+          padding="10px 25px 0 25px"
+        >
+          © {{currentYear}} Calculus d.o.o. Sva prava zadržana.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

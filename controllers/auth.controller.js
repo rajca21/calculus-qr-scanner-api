@@ -8,6 +8,7 @@ import {
   wsUrl,
 } from '../utils/requestConstants.js';
 import { soapBodyBuilder } from '../utils/requestBuilder.js';
+import { sendMail } from '../utils/mailer.js';
 
 const parser = new XMLParser();
 
@@ -69,6 +70,14 @@ export const registerUser = async (req, res) => {
     ) {
       return res.status(400).send('Korisnik sa ovom email adresom već postoji');
     }
+
+    await sendMail(
+      'welcomeEmail',
+      `"Calculus d.o.o." <${process.env.NODEMAILER_MAIL}>`,
+      email,
+      'Uspešna registracija',
+      'Hvala Vam za prijavu na Calculus QR Code Scanner'
+    );
 
     return res.status(201).json({ user: String(result) });
   } catch (error) {
