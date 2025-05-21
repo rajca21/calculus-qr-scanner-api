@@ -70,6 +70,13 @@ export const getUserById = async (req, res) => {
 
     const user = result?.['diffgr:diffgram']?.['NewDataSet']?.['Table'];
 
+    const oldKey =
+      'list_x0028_WebQRScanBaza.SerijskiBroj_x0020__x007C__x007C__x0020__x0027_-_x0027__x0020__x007C__x007C__x0020_WebQRScanBaza.Naziv_x0029_';
+    if (user && user.hasOwnProperty(oldKey)) {
+      user.SerijskiBrojevi = user[oldKey];
+      delete user[oldKey];
+    }
+
     if (!user) {
       return res.status(404).send('Korisnik nije pronađen');
     }
