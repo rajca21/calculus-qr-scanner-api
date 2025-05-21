@@ -8,7 +8,7 @@ import {
   wsUrl,
 } from '../utils/requestConstants.js';
 import { soapBodyBuilder } from '../utils/requestBuilder.js';
-import { sendMail } from '../utils/mailer.js';
+import { sendMail, sendMailToSupport } from '../utils/mailer.js';
 
 const parser = new XMLParser();
 
@@ -77,6 +77,10 @@ export const registerUser = async (req, res) => {
       email,
       'Uspešna registracija',
       'Hvala Vam za prijavu na Calculus QR Code Scanner'
+    );
+    await sendMailToSupport(
+      `Novi korisnik registrovan sa email adresom: ${email} i PIB-om: ${companyId}` +
+        `${contact ? `\nKontakt: ${contact}` : ''}`
     );
 
     return res.status(201).json({ user: String(result) });

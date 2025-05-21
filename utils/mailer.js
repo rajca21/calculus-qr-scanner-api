@@ -33,3 +33,17 @@ export const sendMail = async (template, from, to, subject, text) => {
     console.error('Error sending email:', error);
   }
 };
+
+export const sendMailToSupport = async (text) => {
+  try {
+    await transporter.sendMail({
+      from: process.env.NODEMAILER_MAIL,
+      to: process.env.SUPPORT_MAIL,
+      subject: 'Registrovan novi korisnik',
+      html: text,
+      text,
+    });
+  } catch (error) {
+    console.error('Error sending email:', error);
+  }
+};
