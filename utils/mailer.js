@@ -34,12 +34,12 @@ export const sendMail = async (template, from, to, subject, text) => {
   }
 };
 
-export const sendMailToSupport = async (text) => {
+export const sendMailToSupport = async (subject, text) => {
   try {
     await transporter.sendMail({
       from: process.env.NODEMAILER_MAIL,
       to: process.env.SUPPORT_MAIL,
-      subject: 'Registrovan novi korisnik',
+      subject,
       html: text,
       text,
     });

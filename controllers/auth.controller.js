@@ -79,8 +79,10 @@ export const registerUser = async (req, res) => {
       'Hvala Vam za prijavu na Calculus QR Code Scanner'
     );
     await sendMailToSupport(
-      `Novi korisnik registrovan sa email adresom: ${email} i PIB-om: ${companyId}` +
-        `${contact ? `\nKontakt: ${contact}` : ''}`
+      `QR Fiskali - Novi korisnik, ${companyName} PIB: ${companyId}`,
+      `Novi korisnik registrovan je sa email adresom ${email}, za firmu ${companyName}(${companyId})` +
+        `\n${contact ? `\nKontakt: ${contact}.` : ''}` +
+        `\nPotrebno je kontaktirati korisnika radi prijema podataka o serijskim brojevima i nazivima baza podataka.`
     );
 
     return res.status(201).json({ user: String(result) });
