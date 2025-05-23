@@ -73,7 +73,7 @@ export const registerUser = async (req, res) => {
 
     await sendMail(
       'welcomeEmail',
-      `"Calculus d.o.o." <${process.env.NODEMAILER_MAIL}>`,
+      `"No-Reply" <${process.env.NODEMAILER_MAIL}>`,
       email,
       'Uspešna registracija',
       'Hvala Vam za prijavu na Calculus QR Code Scanner'
