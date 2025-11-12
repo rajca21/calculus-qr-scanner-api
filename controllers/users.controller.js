@@ -248,3 +248,64 @@ export const updateProfileInfo = async (req, res) => {
     return res.status(500).send('Greška prilikom ažuriranja profila');
   }
 };
+
+/**
+ * @route   DELETE /api/users/:id
+ * @desc    Brisanje korisnika
+ * @name    IzbaciWebQRScanKorisnik
+ * @param   {string} req.params.id - SK korisnika
+ */
+export const deleteUser = async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!id) {
+      return res.status(400).send('Nije prosleđen identifikator korisnika');
+    }
+
+    const response = await axios.post(
+      wsUrl,
+      soapBodyBuilder(
+        'IzbaciWebQRScanKorisnik',
+        ['ai_korisniksk'],
+        [String(id)]
+      ),
+      {
+        headers: {
+          'Content-Type': contentType,
+          SOAPAction: getSoapAction('IzbaciWebQRScanKorisnik'),
+          Accept: 'text/xml',
+          'User-Agent': 'Node.js',
+        },
+        httpsAgent: agent,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        validateStatus: () => true,
+      }
+    );
+
+    const xmlData = response.data;
+    const jsonData = parser.parse(xmlData);
+
+    const result =
+      jsonData['soap:Envelope']?.['soap:Body']?.[
+        'IzbaciWebQRScanKorisnikResponse'
+      ]?.['IzbaciWebQRScanKorisnikResult'];
+
+    if (!result) {
+      return res.status(400).send('Web server nije aktivan');
+    }
+
+    if (
+      result ===
+      'ERROR [HY000] [Sybase][ODBC Driver][SQL Anywhere]User-defined exception signaled'
+    ) {
+      return res
+        .status(403)
+        .send('Niste autorizovani da izvršite brisanje naloga');
+    }
+
+    return res.status(202).json({ user: String(result) });
+  } catch (error) {
+    return res.status(500).send('Greška prilikom brisanja naloga');
+  }
+};
