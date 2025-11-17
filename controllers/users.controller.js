@@ -264,11 +264,7 @@ export const deleteUser = async (req, res) => {
 
     const response = await axios.post(
       wsUrl,
-      soapBodyBuilder(
-        'IzbaciWebQRScanKorisnik',
-        ['ai_korisniksk'],
-        [String(id)]
-      ),
+      soapBodyBuilder('IzbaciWebQRScanKorisnik', ['korisniksk'], [String(id)]),
       {
         headers: {
           'Content-Type': contentType,
@@ -304,7 +300,7 @@ export const deleteUser = async (req, res) => {
         .send('Niste autorizovani da izvršite brisanje naloga');
     }
 
-    return res.status(204);
+    return res.status(204).json({ message: 'Nalog uspešno obrisan' });
   } catch (error) {
     return res.status(500).send('Greška prilikom brisanja naloga');
   }
