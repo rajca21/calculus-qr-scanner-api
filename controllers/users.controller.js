@@ -304,7 +304,7 @@ export const deleteUser = async (req, res) => {
         .send('Niste autorizovani da izvršite brisanje naloga');
     }
 
-    return res.status(202).json({ user: String(result) });
+    return res.status(204);
   } catch (error) {
     return res.status(500).send('Greška prilikom brisanja naloga');
   }
