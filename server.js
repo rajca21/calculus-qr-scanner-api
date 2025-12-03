@@ -4,6 +4,7 @@ import serverInfoRouter from './routes/serverInfo.routes.js';
 import authRouter from './routes/auth.routes.js';
 import usersRouter from './routes/users.routes.js';
 import receiptsRouter from './routes/receipts.routes.js';
+import zohoRoutes from './routes/zoho.routes.js';
 
 const app = express();
 const port = process.env.PORT || 8000;
@@ -15,6 +16,7 @@ app.use('/api/info', serverInfoRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/receipts', receiptsRouter);
+app.use('/api/zoho', zohoRoutes);
 
 app.listen(port, () => {
   console.log(`🚀 Server je pokrenut na portu ${port}`);
