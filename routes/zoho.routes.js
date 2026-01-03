@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
-import fs from 'fs';
 import path from 'path';
+import fs from 'fs';
 
 import {
   getAccessTokenRoute,
@@ -12,36 +12,25 @@ import {
 const router = express.Router();
 
 const uploadsDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
-    const safeName = (file.originalname || 'file').replace(
-      /[<>:"/\\|?*\x00-\x1F]/g,
-      '_'
-    );
-    const unique = Date.now() + '-' + safeName;
-    cb(null, unique);
+    const safeName = file.originalname.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+    cb(null, Date.now() + '-' + safeName);
   },
 });
 
 const upload = multer({
   storage,
-  limits: {
-    files: 10,
-    fileSize: 10 * 1024 * 1024,
-  },
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
 });
 
-router.get('/access-token', getAccessTokenRoute);
-router.get('/requests', getZohoRequests);
+const maybeUpload = (req, res, next) => {
+  const ct = (req.headers['content-type'] || '').toLowerCase();
+  if (!ct.includes('multipart/form-data')) return next();
 
-const uploadAttachments = (req, res, next) => {
   upload.array('attachments', 10)(req, res, (err) => {
     if (!err) return next();
 
@@ -53,7 +42,7 @@ const uploadAttachments = (req, res, next) => {
       });
     }
 
-    return res.status(500).json({
+    return res.status(400).json({
       error: 'Upload middleware failed',
       message: err?.message || String(err),
       name: err?.name,
@@ -62,6 +51,9 @@ const uploadAttachments = (req, res, next) => {
   });
 };
 
-router.post('/requests', uploadAttachments, createZohoRequest);
+router.get('/access-token', getAccessTokenRoute);
+router.get('/requests', getZohoRequests);
+
+router.post('/requests', maybeUpload, createZohoRequest);
 
 export default router;
