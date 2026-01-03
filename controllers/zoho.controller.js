@@ -2,12 +2,10 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs/promises';
 import fsSync from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import { getZohoAccessToken, zohoGet } from '../utils/zoho.js';
 
-/**
- * @route   GET /api/zoho/access-token
- * @desc    Vrati svež Zoho access token
- */
 export const getAccessTokenRoute = async (req, res) => {
   try {
     const token = await getZohoAccessToken();
@@ -25,10 +23,6 @@ export const getAccessTokenRoute = async (req, res) => {
   }
 };
 
-/**
- * @route   GET /api/zoho/requests
- * @desc    Vraća listu tiketa iz Zoho ServiceDesk Plus
- */
 export const getZohoRequests = async (req, res) => {
   try {
     const data = await zohoGet('/requests');
@@ -46,54 +40,54 @@ export const getZohoRequests = async (req, res) => {
 };
 
 /**
- * @route   POST /api/zoho/requests
- * @desc    Kreira novi Zoho ServiceDesk Plus request + upload priloga (ako postoje)
- *
- * Očekuje multipart/form-data:
- * - subject (string) [mandatory]
- * - description (string)
- * - requester_email (string)
- * - priority (string)
- * - attachments (file[])  <-- multer: upload.array('attachments', 10)
+ * POST /api/zoho/requests
+ * JSON:
+ * - subject (mandatory)
+ * - description
+ * - requester_email (mandatory)
+ * - priority (mandatory)
+ * - attachments: [{ filename, contentType, dataBase64 }]
  */
 export const createZohoRequest = async (req, res) => {
   const startedAt = Date.now();
 
   try {
-    console.log('[ZOHO] Incoming request:', {
+    console.log('[ZOHO] Incoming JSON request:', {
       contentType: req.headers['content-type'],
-      hasFiles: !!req.files?.length,
-      filesCount: req.files?.length || 0,
       bodyKeys: Object.keys(req.body || {}),
+      attachmentsCount: Array.isArray(req.body?.attachments)
+        ? req.body.attachments.length
+        : 0,
     });
-
-    if (req.files?.length) {
-      console.log(
-        '[ZOHO] Files:',
-        req.files.map((f) => ({
-          fieldname: f.fieldname,
-          originalname: f.originalname,
-          mimetype: f.mimetype,
-          size: f.size,
-          path: f.path,
-        }))
-      );
-    }
 
     const token = await getZohoAccessToken();
 
     const subject = (req.body?.subject ?? '').toString();
     const description = (req.body?.description ?? '').toString();
-    const requester_email = req.body?.requester_email
-      ? req.body.requester_email.toString()
-      : '';
-    const priority = req.body?.priority ? req.body.priority.toString() : '';
+    const requester_email = (req.body?.requester_email ?? '').toString();
+    const priority = (req.body?.priority ?? '').toString();
 
     if (!subject || subject.trim().length === 0) {
       return res.status(400).json({
         error: 'Subject je obavezan',
-        hint: 'Pošalji form-data polje "subject".',
+        hint: 'Pošalji JSON polje "subject".',
         received: { subject },
+      });
+    }
+
+    if (!requester_email || requester_email.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Requester email je obavezan',
+        hint: 'Pošalji JSON polje "requester_email".',
+        received: { requester_email },
+      });
+    }
+
+    if (!priority || priority.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Priority je obavezan',
+        hint: 'Pošalji JSON polje "priority".',
+        received: { priority },
       });
     }
 
@@ -103,38 +97,23 @@ export const createZohoRequest = async (req, res) => {
         description: description
           ? `<p>${description}</p>`
           : '<p>No description</p>',
+        requester: { email_id: requester_email.trim() },
+        priority: { name: priority.trim() },
       },
     };
 
-    if (requester_email) {
-      requestData.request.requester = { email_id: requester_email.trim() };
-    }
-
-    if (priority) {
-      requestData.request.priority = { name: priority.trim() };
-    }
-
-    let createResponse;
-    try {
-      createResponse = await axios.post(
-        `${process.env.ZOHO_BASE_URL}/requests`,
-        { input_data: JSON.stringify(requestData) },
-        {
-          headers: {
-            Authorization: `Zoho-oauthtoken ${token}`,
-            Accept: 'application/vnd.manageengine.sdp.v3+json',
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          validateStatus: () => true,
-        }
-      );
-    } catch (e) {
-      console.error(
-        '[ZOHO] Axios error on create (network/axios):',
-        e?.message || e
-      );
-      throw e;
-    }
+    const createResponse = await axios.post(
+      `${process.env.ZOHO_BASE_URL}/requests`,
+      { input_data: JSON.stringify(requestData) },
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`,
+          Accept: 'application/vnd.manageengine.sdp.v3+json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        validateStatus: () => true,
+      }
+    );
 
     if (createResponse.status < 200 || createResponse.status >= 300) {
       console.error('[ZOHO] Create failed:', {
@@ -152,12 +131,7 @@ export const createZohoRequest = async (req, res) => {
     }
 
     const requestId = createResponse?.data?.request?.id;
-
     if (!requestId) {
-      console.error(
-        '[ZOHO] Missing requestId in response:',
-        createResponse.data
-      );
       return res.status(502).json({
         error: 'Zoho did not return request.id',
         step: 'create_request',
@@ -166,18 +140,41 @@ export const createZohoRequest = async (req, res) => {
       });
     }
 
+    const attachments = Array.isArray(req.body?.attachments)
+      ? req.body.attachments
+      : [];
     const uploadedFiles = [];
     const uploadErrors = [];
 
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
+    if (attachments.length > 0) {
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (!fsSync.existsSync(uploadsDir))
+        fsSync.mkdirSync(uploadsDir, { recursive: true });
+
+      for (const a of attachments) {
+        const filenameRaw = (a?.filename ?? 'file.bin').toString();
+        const contentType = (
+          a?.contentType ?? 'application/octet-stream'
+        ).toString();
+        const b64 = (a?.dataBase64 ?? '').toString();
+
+        if (!b64) continue;
+
+        const safeName = filenameRaw.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+        const tmpName = `${Date.now()}-${crypto
+          .randomBytes(6)
+          .toString('hex')}-${safeName}`;
+        const filePath = path.join(uploadsDir, tmpName);
+
         try {
+          const buffer = Buffer.from(b64, 'base64');
+          await fs.writeFile(filePath, buffer);
+
           const form = new FormData();
-          form.append(
-            'filename',
-            fsSync.createReadStream(file.path),
-            file.originalname
-          );
+          form.append('filename', fsSync.createReadStream(filePath), {
+            filename: safeName,
+            contentType,
+          });
           form.append('addtoattachment', 'true');
 
           const uploadResp = await axios.post(
@@ -195,14 +192,8 @@ export const createZohoRequest = async (req, res) => {
           );
 
           if (uploadResp.status < 200 || uploadResp.status >= 300) {
-            console.error('[ZOHO] Upload failed:', {
-              file: file.originalname,
-              httpStatus: uploadResp.status,
-              data: uploadResp.data,
-            });
-
             uploadErrors.push({
-              file: file.originalname,
+              file: safeName,
               zoho_http_status: uploadResp.status,
               zoho_response: uploadResp.data,
             });
@@ -210,27 +201,16 @@ export const createZohoRequest = async (req, res) => {
             uploadedFiles.push(uploadResp.data);
           }
         } catch (e) {
-          console.error(
-            '[ZOHO] Upload exception:',
-            file.originalname,
-            e?.message || e
-          );
           uploadErrors.push({
-            file: file.originalname,
+            file: safeName,
             exception: e?.message,
             zoho: e?.response?.data,
             status: e?.response?.status,
           });
         } finally {
           try {
-            await fs.unlink(file.path);
-          } catch (delErr) {
-            console.warn(
-              '[ZOHO] Failed to delete temp file:',
-              file.path,
-              delErr?.message || delErr
-            );
-          }
+            await fs.unlink(filePath);
+          } catch {}
         }
       }
     }
@@ -242,30 +222,23 @@ export const createZohoRequest = async (req, res) => {
       attachments: uploadedFiles,
       attachment_errors: uploadErrors.length ? uploadErrors : null,
       debug: {
-        received_files: req.files?.length || 0,
         received_body_keys: Object.keys(req.body || {}),
+        received_attachments: attachments.length,
       },
     });
   } catch (error) {
-    const isAxios = !!error?.isAxiosError;
-    const httpStatus = error?.response?.status;
-    const zohoData = error?.response?.data;
-
     console.error('Create Zoho Request Error (catch):', {
       message: error?.message,
-      isAxios,
-      httpStatus,
-      zohoData,
+      httpStatus: error?.response?.status,
+      zohoData: error?.response?.data,
       stack: error?.stack,
     });
 
     return res.status(500).json({
       error: 'Zoho request creation failed',
       message: error?.message,
-      isAxios,
-      httpStatus,
-      zoho: zohoData,
-      stack: error?.stack,
+      httpStatus: error?.response?.status,
+      zoho: error?.response?.data,
     });
   }
 };
