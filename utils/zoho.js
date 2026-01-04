@@ -15,7 +15,9 @@ export const getZohoAccessToken = async () => {
     'https://accounts.zoho.com/oauth/v2/token',
     params.toString(),
     {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
     }
   );
 
@@ -23,17 +25,25 @@ export const getZohoAccessToken = async () => {
 };
 
 /**
- * Wrapper za Zoho Desk GET API
+ * Univerzalni wrapper za SDP API pozive
  */
-export const zohoGet = async (endpoint) => {
-  const token = await getZohoAccessToken();
-
-  const resp = await axios.get(`${process.env.ZOHO_BASE_URL}${endpoint}`, {
+export const zohoRequest = async ({
+  method,
+  endpoint,
+  token,
+  data,
+  headers = {},
+}) => {
+  return axios({
+    method,
+    url: `${process.env.ZOHO_BASE_URL}${endpoint}`,
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
       Accept: 'application/vnd.manageengine.sdp.v3+json',
+      ...headers,
     },
+    data,
+    validateStatus: () => true,
+    maxBodyLength: Infinity,
   });
-
-  return resp.data;
 };
