@@ -36,7 +36,7 @@ export const registerUser = async (req, res) => {
       soapBodyBuilder(
         'UbaciWebQRScanKorisnik',
         ['email', 'lozinka', 'pib', 'nazivfirme', 'kontakt', 'token'],
-        [email, password, companyId, companyName, contact, '']
+        [email, password, companyId, companyName, contact, ''],
       ),
       {
         headers: {
@@ -49,7 +49,7 @@ export const registerUser = async (req, res) => {
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: () => true,
-      }
+      },
     );
 
     const xmlData = response.data;
@@ -76,13 +76,13 @@ export const registerUser = async (req, res) => {
       `"No-Reply" <${process.env.NODEMAILER_MAIL}>`,
       email,
       'Uspešna registracija',
-      'Hvala Vam za prijavu na Calculus QR Code Scanner'
+      'Hvala Vam za prijavu na Calculus QR Code Scanner',
     );
     await sendMailToSupport(
       `QR Fiskali - Novi korisnik, ${companyName} PIB: ${companyId}`,
       `Novi korisnik registrovan je sa email adresom ${email}, za firmu ${companyName}(${companyId})` +
         `\n${contact ? `\nKontakt: ${contact}.` : ''}` +
-        `\nPotrebno je kontaktirati korisnika radi prijema podataka o serijskim brojevima i nazivima baza podataka.`
+        `\nPotrebno je kontaktirati korisnika radi prijema podataka o serijskim brojevima i nazivima baza podataka.`,
     );
 
     return res.status(201).json({ user: String(result) });
@@ -120,7 +120,7 @@ export const loginUser = async (req, res) => {
           'token',
           'tipazur',
         ],
-        ['0', email, password, '', '', '', '', '', 'L']
+        ['0', email, password, '', '', '', '', '', 'L'],
       ),
       {
         headers: {
@@ -133,7 +133,7 @@ export const loginUser = async (req, res) => {
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: () => true,
-      }
+      },
     );
 
     const xmlData = response.data;
@@ -193,7 +193,7 @@ export const logoutUser = async (req, res) => {
           'token',
           'tipazur',
         ],
-        [uid, '', '', '', '', '', '', token, 'O']
+        [uid, '', '', '', '', '', '', token, 'O'],
       ),
       {
         headers: {
@@ -206,7 +206,7 @@ export const logoutUser = async (req, res) => {
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: () => true,
-      }
+      },
     );
 
     const xmlData = response.data;
@@ -231,5 +231,78 @@ export const logoutUser = async (req, res) => {
     return res.status(200).json({ user: String(result) });
   } catch (error) {
     return res.status(500).send('Greška prilikom odjavljivanja korisnika');
+  }
+};
+
+/**
+ * @route   POST /api/auth/validate
+ * @desc    Provera da li je session token i dalje validan
+ * @name    AzurWebQRScanKorisnik (tipazur = V)
+ * @param   {string} req.body.uid - SK korisnika
+ * @param   {string} req.body.token - Session token
+ */
+export const validateToken = async (req, res) => {
+  const { uid, token } = req.body;
+
+  try {
+    if (!uid || !token) {
+      return res
+        .status(400)
+        .send('Nisu prosleđeni identifikator i token sesije');
+    }
+
+    const response = await axios.post(
+      wsUrl,
+      soapBodyBuilder(
+        'AzurWebQRScanKorisnik',
+        [
+          'korisniksk',
+          'email',
+          'lozinka',
+          'novalozinka',
+          'pib',
+          'nazivfirme',
+          'kontakt',
+          'token',
+          'tipazur',
+        ],
+        [uid, '', '', '', '', '', '', token, 'V'],
+      ),
+      {
+        headers: {
+          'Content-Type': contentType,
+          SOAPAction: getSoapAction('AzurWebQRScanKorisnik'),
+          Accept: 'text/xml',
+          'User-Agent': 'Node.js',
+        },
+        httpsAgent: agent,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        validateStatus: () => true,
+      },
+    );
+
+    const xmlData = response.data;
+    const jsonData = parser.parse(xmlData);
+
+    const result =
+      jsonData['soap:Envelope']?.['soap:Body']?.[
+        'AzurWebQRScanKorisnikResponse'
+      ]?.['AzurWebQRScanKorisnikResult'];
+
+    if (!result) {
+      return res.status(400).send('Web server nije aktivan');
+    }
+
+    if (
+      result ===
+      'ERROR [HY000] [Sybase][ODBC Driver][SQL Anywhere]User-defined exception signaled'
+    ) {
+      return res.status(401).send('Sesija je istekla ili token nije validan');
+    }
+
+    return res.status(200).json({ valid: true, user: String(result) });
+  } catch (error) {
+    return res.status(500).send('Greška prilikom provere sesije');
   }
 };
