@@ -8,6 +8,7 @@ import authRouter from './routes/auth.routes.js';
 import usersRouter from './routes/users.routes.js';
 import receiptsRouter from './routes/receipts.routes.js';
 import zohoRoutes from './routes/zoho.routes.js';
+import resendRoutes from './routes/resend.routes.js';
 
 const app = express();
 const port = process.env.PORT || 8000;
@@ -31,6 +32,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/receipts', receiptsRouter);
 app.use('/api/zoho', zohoRoutes);
+app.use('/api/resend', resendRoutes);
 
 app.use((req, res) => {
   return res.status(404).json({
