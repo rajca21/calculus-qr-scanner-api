@@ -5,6 +5,8 @@ import {
   createZohoRequest,
   getZohoRequestTasks,
   getZohoRequestWorklogs,
+  getZohoRequestsExportReport,
+  getZohoTaskWorklogsExportReport,
 } from '../controllers/zoho.controller.js';
 
 const router = express.Router();
@@ -17,5 +19,8 @@ router.get(
   '/requests/:requestId/tasks/:taskId/worklogs',
   getZohoRequestWorklogs,
 );
+
+router.get('/reports/requests-export', getZohoRequestsExportReport);
+router.get('/reports/task-worklogs-export', getZohoTaskWorklogsExportReport);
 
 export default router;

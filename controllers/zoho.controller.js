@@ -12,6 +12,14 @@ import {
   toPositiveInt,
   toZohoTimestamp,
   zohoRequest,
+  ALLOWED_REPORT_GROUPS,
+  getThisMonthRange,
+  fetchRequestsReportPage,
+  mapRequestToExportRow,
+  buildRequestsSearchCriteria,
+  enrichRequestsWithDetails,
+  TASK_WORKLOG_REPORT_COLUMNS,
+  buildTaskWorklogReportRowsForRequests,
 } from '../utils/zoho.js';
 import { ensureRequester } from '../utils/sdpRequester.js';
 
@@ -558,6 +566,697 @@ export const createZohoRequest = async (req, res) => {
       message: e?.message,
       httpStatus: e?.response?.status,
       zoho: e?.response?.data,
+    });
+  }
+};
+
+/**
+ * @route   GET /api/zoho/reports/requests-export
+ * @desc    Report/export Zoho SDP zahteva sa izabranim kolonama
+ * @name    getZohoRequestsExportReport
+ * @param   {string} req.query.createdAfter - Datum od kog se povlače zahtevi, format YYYY-MM-DD
+ * @param   {string} req.query.createdBefore - Datum do kog se povlače zahtevi, format YYYY-MM-DD
+ * @param   {string} req.query.period - Custom period, trenutno podržano: this_month
+ * @param   {string} req.query.group - Filter po grupi: Tehnička podrška, Proizvodnja ili Prodaja
+ * @param   {number} req.query.page - Broj stranice
+ * @param   {number} req.query.perPage - Broj zahteva po stranici
+ * @param   {number} req.query.startIndex - Početni indeks za Zoho list_info
+ * @param   {string} req.query.sortField - Polje za sortiranje
+ * @param   {string} req.query.sortOrder - Redosled sortiranja: asc ili desc
+ * @param   {boolean} req.query.all - Ako je true, povlači sve strane za zadati period/filter
+ * @param   {number} req.query.maxPages - Maksimalan broj strana kada je all=true
+ * @param   {boolean} req.query.debug - Ako je true, ispisuje detaljne logove
+ */
+export const getZohoRequestsExportReport = async (req, res) => {
+  try {
+    const token = await getZohoAccessToken();
+
+    const debug =
+      String(req.query.debug || '')
+        .trim()
+        .toLowerCase() === 'true';
+
+    const startedAt = Date.now();
+
+    const period = String(req.query.period || '')
+      .trim()
+      .toLowerCase();
+
+    const all =
+      String(req.query.all || '')
+        .trim()
+        .toLowerCase() === 'true';
+
+    let createdAfterRaw = String(req.query.createdAfter || '').trim();
+    let createdBeforeRaw = String(req.query.createdBefore || '').trim();
+
+    if (period && period !== 'this_month') {
+      return res.status(400).json({
+        error: 'Nepodržan period. Trenutno je podržano samo: this_month',
+        received: period,
+      });
+    }
+
+    if (period === 'this_month') {
+      const range = getThisMonthRange();
+
+      createdAfterRaw = range.createdAfterRaw;
+      createdBeforeRaw = range.createdBeforeRaw;
+    }
+
+    if (!createdAfterRaw || !createdBeforeRaw) {
+      return res.status(400).json({
+        error:
+          'createdAfter i createdBefore su obavezni, osim ako se pošalje period=this_month',
+        example:
+          '/api/zoho/reports/requests-export?createdAfter=2026-04-01&createdBefore=2026-04-30',
+      });
+    }
+
+    const createdAfter = toZohoTimestamp(createdAfterRaw, false);
+    const createdBefore = toZohoTimestamp(createdBeforeRaw, true);
+
+    if (!createdAfter) {
+      return res.status(400).json({
+        error: 'createdAfter mora biti validan datum u formatu YYYY-MM-DD',
+        received: createdAfterRaw,
+      });
+    }
+
+    if (!createdBefore) {
+      return res.status(400).json({
+        error: 'createdBefore mora biti validan datum u formatu YYYY-MM-DD',
+        received: createdBeforeRaw,
+      });
+    }
+
+    const group = String(req.query.group || '').trim();
+
+    if (group && !ALLOWED_REPORT_GROUPS.includes(group)) {
+      return res.status(400).json({
+        error: 'Nepodržana grupa',
+        allowed_groups: ALLOWED_REPORT_GROUPS,
+        received: group,
+      });
+    }
+
+    const page = toPositiveInt(req.query.page, 1);
+    const perPage = Math.min(toPositiveInt(req.query.perPage, 100), 100);
+    const sortField = String(req.query.sortField || 'created_time').trim();
+    const sortOrder = normalizeSortOrder(req.query.sortOrder);
+
+    const columns = [
+      'Group',
+      'Technician',
+      'Site',
+      'Subject',
+      'RequestID',
+      'Created Time',
+      'Completed Time',
+      'Rezime zahteva',
+      'Rezime rešenja',
+      'Korisnik',
+    ];
+
+    if (debug) {
+      console.log('[ZOHO REPORT] START', {
+        all,
+        period: period || null,
+        createdAfterRaw,
+        createdBeforeRaw,
+        createdAfter,
+        createdBefore,
+        group: group || null,
+        page,
+        perPage,
+        sortField,
+        sortOrder,
+      });
+    }
+
+    if (!all) {
+      const startIndex = toPositiveInt(
+        req.query.startIndex,
+        (page - 1) * perPage + 1,
+      );
+
+      const { resp, inputData } = await fetchRequestsReportPage({
+        token,
+        page,
+        perPage,
+        startIndex,
+        sortField,
+        sortOrder,
+        group,
+        createdAfter,
+        createdBefore,
+        debug,
+      });
+
+      if (resp.status < 200 || resp.status >= 300) {
+        return res.status(502).json({
+          error: 'Fetching requests export report failed',
+          zoho_http_status: resp.status,
+          zoho_response: resp.data,
+          sent_input_data: inputData,
+        });
+      }
+
+      const requests = resp.data?.requests ?? [];
+
+      if (debug) {
+        console.log('[ZOHO REPORT] Paged list fetched', {
+          requestsCount: requests.length,
+          hasMoreRows: resp.data?.list_info?.has_more_rows,
+        });
+      }
+
+      const enrichedRequests = await enrichRequestsWithDetails({
+        token,
+        requests,
+        debug,
+      });
+
+      const rows = enrichedRequests.map(mapRequestToExportRow);
+
+      if (debug) {
+        console.log('[ZOHO REPORT] END PAGED', {
+          rowsCount: rows.length,
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
+
+      return res.json({
+        status: 'success',
+        report: 'requests_export',
+        mode: 'paged',
+        filters: {
+          period: period || null,
+          createdAfter: createdAfterRaw,
+          createdBefore: createdBeforeRaw,
+          group: group || null,
+        },
+        pagination: {
+          page,
+          perPage,
+          startIndex,
+          hasMoreRows: resp.data?.list_info?.has_more_rows ?? false,
+          zoho_list_info: resp.data?.list_info ?? null,
+        },
+        columns,
+        count: rows.length,
+        data: rows,
+        raw_count: requests.length,
+      });
+    }
+
+    const allRows = [];
+    const rawRequestsCountByPage = [];
+    let currentStartIndex = 1;
+    let currentPage = 1;
+    let hasMoreRows = true;
+    let lastInputData = null;
+
+    const maxPages = Math.min(toPositiveInt(req.query.maxPages, 200), 500);
+
+    if (debug) {
+      console.log('[ZOHO REPORT] ALL mode loop START', {
+        maxPages,
+      });
+    }
+
+    while (hasMoreRows && currentPage <= maxPages) {
+      if (debug) {
+        console.log('[ZOHO REPORT] ALL page loop BEFORE fetch', {
+          currentPage,
+          currentStartIndex,
+          perPage,
+          totalRowsSoFar: allRows.length,
+        });
+      }
+
+      const { resp, inputData } = await fetchRequestsReportPage({
+        token,
+        page: currentPage,
+        perPage,
+        startIndex: currentStartIndex,
+        sortField,
+        sortOrder,
+        group,
+        createdAfter,
+        createdBefore,
+        debug,
+      });
+
+      lastInputData = inputData;
+
+      if (resp.status < 200 || resp.status >= 300) {
+        return res.status(502).json({
+          error: 'Fetching all requests export report failed',
+          failed_page: currentPage,
+          failed_start_index: currentStartIndex,
+          zoho_http_status: resp.status,
+          zoho_response: resp.data,
+          sent_input_data: inputData,
+          collected_rows: allRows.length,
+        });
+      }
+
+      const requests = resp.data?.requests ?? [];
+
+      if (debug) {
+        console.log('[ZOHO REPORT] ALL page list fetched', {
+          currentPage,
+          currentStartIndex,
+          requestsCount: requests.length,
+          hasMoreRowsFromZoho: resp.data?.list_info?.has_more_rows,
+          zohoRowCount: resp.data?.list_info?.row_count,
+        });
+      }
+
+      const enrichedRequests = await enrichRequestsWithDetails({
+        token,
+        requests,
+        debug,
+      });
+
+      const rows = enrichedRequests.map(mapRequestToExportRow);
+
+      allRows.push(...rows);
+
+      rawRequestsCountByPage.push({
+        page: currentPage,
+        startIndex: currentStartIndex,
+        count: requests.length,
+      });
+
+      hasMoreRows = Boolean(resp.data?.list_info?.has_more_rows);
+
+      if (debug) {
+        console.log('[ZOHO REPORT] ALL page processed', {
+          currentPage,
+          rowsAdded: rows.length,
+          totalRows: allRows.length,
+          hasMoreRows,
+        });
+      }
+
+      if (!hasMoreRows || requests.length === 0) {
+        break;
+      }
+
+      const zohoReturnedCount =
+        Number(resp.data?.list_info?.row_count) || requests.length || perPage;
+
+      currentStartIndex += zohoReturnedCount;
+      currentPage += 1;
+    }
+
+    if (debug) {
+      console.log('[ZOHO REPORT] END ALL', {
+        pagesFetched: rawRequestsCountByPage.length,
+        totalRows: allRows.length,
+        elapsedMs: Date.now() - startedAt,
+        stoppedByMaxPages: hasMoreRows && currentPage > maxPages,
+      });
+    }
+
+    return res.json({
+      status: 'success',
+      report: 'requests_export',
+      mode: 'all',
+      filters: {
+        period: period || null,
+        createdAfter: createdAfterRaw,
+        createdBefore: createdBeforeRaw,
+        group: group || null,
+      },
+      pagination: {
+        perPage,
+        pagesFetched: rawRequestsCountByPage.length,
+        lastStartIndex: currentStartIndex,
+        hasMoreRows,
+        stoppedByMaxPages: hasMoreRows && currentPage > maxPages,
+        maxPages,
+      },
+      columns,
+      count: allRows.length,
+      data: allRows,
+      debug: {
+        pages: rawRequestsCountByPage,
+        last_sent_input_data: lastInputData,
+      },
+    });
+  } catch (e) {
+    console.error('[ZOHO REPORT] ERROR', {
+      message: e?.message,
+      status: e?.response?.status,
+      zoho: e?.response?.data,
+      stack: e?.stack,
+    });
+
+    return res.status(500).json({
+      error: 'Requests export report failed',
+      message: e?.message,
+      zoho: e?.response?.data,
+      status: e?.response?.status,
+    });
+  }
+};
+
+/**
+ * @route   GET /api/zoho/reports/task-worklogs-export
+ * @desc    Report/export Zoho SDP worklogova kroz requeste i taskove
+ * @name    getZohoTaskWorklogsExportReport
+ * @param   {string} req.query.createdAfter - Datum od kog se povlače zahtevi, format YYYY-MM-DD
+ * @param   {string} req.query.createdBefore - Datum do kog se povlače zahtevi, format YYYY-MM-DD
+ * @param   {string} req.query.period - Custom period, trenutno podržano: this_month
+ * @param   {string} req.query.group - Filter po grupi: Tehnička podrška, Proizvodnja ili Prodaja
+ * @param   {number} req.query.page - Broj stranice zahteva
+ * @param   {number} req.query.perPage - Broj zahteva po stranici
+ * @param   {number} req.query.startIndex - Početni indeks za request list_info
+ * @param   {string} req.query.sortField - Polje za sortiranje requestova
+ * @param   {string} req.query.sortOrder - Redosled sortiranja: asc ili desc
+ * @param   {boolean} req.query.all - Ako je true, povlači sve request strane za zadati period/filter
+ * @param   {number} req.query.maxPages - Maksimalan broj request strana kada je all=true
+ * @param   {number} req.query.taskMaxPages - Maksimalan broj task strana po requestu
+ * @param   {number} req.query.worklogMaxPages - Maksimalan broj worklog strana po tasku
+ * @param   {boolean} req.query.debug - Ako je true, ispisuje detaljne logove
+ */
+export const getZohoTaskWorklogsExportReport = async (req, res) => {
+  try {
+    const token = await getZohoAccessToken();
+
+    const debug =
+      String(req.query.debug || '')
+        .trim()
+        .toLowerCase() === 'true';
+
+    const startedAt = Date.now();
+
+    const period = String(req.query.period || '')
+      .trim()
+      .toLowerCase();
+
+    const all =
+      String(req.query.all || '')
+        .trim()
+        .toLowerCase() === 'true';
+
+    let createdAfterRaw = String(req.query.createdAfter || '').trim();
+    let createdBeforeRaw = String(req.query.createdBefore || '').trim();
+
+    if (period && period !== 'this_month') {
+      return res.status(400).json({
+        error: 'Nepodržan period. Trenutno je podržano samo: this_month',
+        received: period,
+      });
+    }
+
+    if (period === 'this_month') {
+      const range = getThisMonthRange();
+
+      createdAfterRaw = range.createdAfterRaw;
+      createdBeforeRaw = range.createdBeforeRaw;
+    }
+
+    if (!createdAfterRaw || !createdBeforeRaw) {
+      return res.status(400).json({
+        error:
+          'createdAfter i createdBefore su obavezni, osim ako se pošalje period=this_month',
+        example:
+          '/api/zoho/reports/task-worklogs-export?createdAfter=2026-04-01&createdBefore=2026-04-30',
+      });
+    }
+
+    const createdAfter = toZohoTimestamp(createdAfterRaw, false);
+    const createdBefore = toZohoTimestamp(createdBeforeRaw, true);
+
+    if (!createdAfter) {
+      return res.status(400).json({
+        error: 'createdAfter mora biti validan datum u formatu YYYY-MM-DD',
+        received: createdAfterRaw,
+      });
+    }
+
+    if (!createdBefore) {
+      return res.status(400).json({
+        error: 'createdBefore mora biti validan datum u formatu YYYY-MM-DD',
+        received: createdBeforeRaw,
+      });
+    }
+
+    const group = String(req.query.group || '').trim();
+
+    if (group && !ALLOWED_REPORT_GROUPS.includes(group)) {
+      return res.status(400).json({
+        error: 'Nepodržana grupa',
+        allowed_groups: ALLOWED_REPORT_GROUPS,
+        received: group,
+      });
+    }
+
+    const page = toPositiveInt(req.query.page, 1);
+    const perPage = Math.min(toPositiveInt(req.query.perPage, 100), 100);
+    const sortField = String(req.query.sortField || 'created_time').trim();
+    const sortOrder = normalizeSortOrder(req.query.sortOrder);
+
+    const taskMaxPages = Math.min(
+      toPositiveInt(req.query.taskMaxPages, 50),
+      200,
+    );
+
+    const worklogMaxPages = Math.min(
+      toPositiveInt(req.query.worklogMaxPages, 50),
+      200,
+    );
+
+    if (debug) {
+      console.log('[ZOHO TASK-WORKLOG REPORT] START', {
+        all,
+        period: period || null,
+        createdAfterRaw,
+        createdBeforeRaw,
+        group: group || null,
+        page,
+        perPage,
+        sortField,
+        sortOrder,
+        taskMaxPages,
+        worklogMaxPages,
+      });
+    }
+
+    if (!all) {
+      const startIndex = toPositiveInt(
+        req.query.startIndex,
+        (page - 1) * perPage + 1,
+      );
+
+      const { resp, inputData } = await fetchRequestsReportPage({
+        token,
+        page,
+        perPage,
+        startIndex,
+        sortField,
+        sortOrder,
+        group,
+        createdAfter,
+        createdBefore,
+        debug,
+      });
+
+      if (resp.status < 200 || resp.status >= 300) {
+        return res.status(502).json({
+          error: 'Fetching task worklogs export report failed',
+          zoho_http_status: resp.status,
+          zoho_response: resp.data,
+          sent_input_data: inputData,
+        });
+      }
+
+      const requests = resp.data?.requests ?? [];
+      const enrichedRequests = await enrichRequestsWithDetails({
+        token,
+        requests,
+        debug,
+      });
+
+      const { rows, debugSummary } =
+        await buildTaskWorklogReportRowsForRequests({
+          token,
+          requests: enrichedRequests,
+          taskMaxPages,
+          worklogMaxPages,
+          debug,
+        });
+
+      return res.json({
+        status: 'success',
+        report: 'task_worklogs_export',
+        mode: 'paged',
+        filters: {
+          period: period || null,
+          createdAfter: createdAfterRaw,
+          createdBefore: createdBeforeRaw,
+          group: group || null,
+        },
+        pagination: {
+          page,
+          perPage,
+          startIndex,
+          hasMoreRows: resp.data?.list_info?.has_more_rows ?? false,
+          zoho_list_info: resp.data?.list_info ?? null,
+        },
+        columns: TASK_WORKLOG_REPORT_COLUMNS,
+        count: rows.length,
+        data: rows,
+        raw_request_count: requests.length,
+        debug: {
+          elapsedMs: Date.now() - startedAt,
+          summary: debugSummary,
+        },
+      });
+    }
+
+    const allRows = [];
+    const rawRequestsCountByPage = [];
+    const allDebugSummary = [];
+
+    let currentStartIndex = 1;
+    let currentPage = 1;
+    let hasMoreRows = true;
+    let lastInputData = null;
+
+    const maxPages = Math.min(toPositiveInt(req.query.maxPages, 200), 500);
+
+    while (hasMoreRows && currentPage <= maxPages) {
+      if (debug) {
+        console.log('[ZOHO TASK-WORKLOG REPORT] Request page START', {
+          currentPage,
+          currentStartIndex,
+          rowsSoFar: allRows.length,
+        });
+      }
+
+      const { resp, inputData } = await fetchRequestsReportPage({
+        token,
+        page: currentPage,
+        perPage,
+        startIndex: currentStartIndex,
+        sortField,
+        sortOrder,
+        group,
+        createdAfter,
+        createdBefore,
+        debug,
+      });
+
+      lastInputData = inputData;
+
+      if (resp.status < 200 || resp.status >= 300) {
+        return res.status(502).json({
+          error: 'Fetching all task worklogs export report failed',
+          failed_page: currentPage,
+          failed_start_index: currentStartIndex,
+          zoho_http_status: resp.status,
+          zoho_response: resp.data,
+          sent_input_data: inputData,
+          collected_rows: allRows.length,
+        });
+      }
+
+      const requests = resp.data?.requests ?? [];
+      const enrichedRequests = await enrichRequestsWithDetails({
+        token,
+        requests,
+        debug,
+      });
+
+      const { rows, debugSummary } =
+        await buildTaskWorklogReportRowsForRequests({
+          token,
+          requests: enrichedRequests,
+          taskMaxPages,
+          worklogMaxPages,
+          debug,
+        });
+
+      allRows.push(...rows);
+      allDebugSummary.push(...debugSummary);
+
+      rawRequestsCountByPage.push({
+        page: currentPage,
+        startIndex: currentStartIndex,
+        count: requests.length,
+        rowsAdded: rows.length,
+      });
+
+      hasMoreRows = Boolean(resp.data?.list_info?.has_more_rows);
+
+      if (debug) {
+        console.log('[ZOHO TASK-WORKLOG REPORT] Request page END', {
+          currentPage,
+          currentStartIndex,
+          requestsCount: requests.length,
+          rowsAdded: rows.length,
+          totalRows: allRows.length,
+          hasMoreRows,
+        });
+      }
+
+      if (!hasMoreRows || requests.length === 0) {
+        break;
+      }
+
+      const zohoReturnedCount =
+        Number(resp.data?.list_info?.row_count) || requests.length || perPage;
+
+      currentStartIndex += zohoReturnedCount;
+      currentPage += 1;
+    }
+
+    return res.json({
+      status: 'success',
+      report: 'task_worklogs_export',
+      mode: 'all',
+      filters: {
+        period: period || null,
+        createdAfter: createdAfterRaw,
+        createdBefore: createdBeforeRaw,
+        group: group || null,
+      },
+      pagination: {
+        perPage,
+        pagesFetched: rawRequestsCountByPage.length,
+        lastStartIndex: currentStartIndex,
+        hasMoreRows,
+        stoppedByMaxPages: hasMoreRows && currentPage > maxPages,
+        maxPages,
+      },
+      columns: TASK_WORKLOG_REPORT_COLUMNS,
+      count: allRows.length,
+      data: allRows,
+      debug: {
+        elapsedMs: Date.now() - startedAt,
+        pages: rawRequestsCountByPage,
+        request_summary: allDebugSummary,
+        last_sent_input_data: lastInputData,
+      },
+    });
+  } catch (e) {
+    console.error('[ZOHO TASK-WORKLOG REPORT] ERROR', {
+      message: e?.message,
+      status: e?.response?.status,
+      zoho: e?.response?.data,
+      stack: e?.stack,
+    });
+
+    return res.status(500).json({
+      error: 'Task worklogs export report failed',
+      message: e?.message,
+      zoho: e?.response?.data,
+      status: e?.response?.status,
     });
   }
 };
