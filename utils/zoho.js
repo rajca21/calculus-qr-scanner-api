@@ -18,11 +18,58 @@ export const getZohoAccessToken = async () => {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-    }
+    },
   );
 
   return resp.data.access_token;
 };
+
+/**
+ * Generiše i vraća novi Zoho access token
+ */
+export const getAccessTokenRoute = async (req, res) => {
+  try {
+    const token = await getZohoAccessToken();
+    return res.json({ access_token: token });
+  } catch (e) {
+    return res.status(500).json({
+      error: 'Token generation failed',
+      message: e?.message,
+    });
+  }
+};
+
+/**
+ * Konvertuje vrednost u pozitivan ceo broj ili vraća fallback vrednost
+ */
+export function toPositiveInt(value, fallback) {
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Konvertuje datum u Zoho timestamp
+ */
+export function toZohoTimestamp(dateStr, endOfDay = false) {
+  if (!dateStr) return null;
+
+  const normalized = String(dateStr).trim();
+
+  const iso = endOfDay
+    ? `${normalized}T23:59:59.999`
+    : `${normalized}T00:00:00.000`;
+
+  const ms = new Date(iso).getTime();
+
+  return Number.isNaN(ms) ? null : String(ms);
+}
+
+/**
+ * Normalizuje redosled sortiranja
+ */
+export function normalizeSortOrder(value) {
+  return String(value || '').toLowerCase() === 'asc' ? 'asc' : 'desc';
+}
 
 /**
  * Univerzalni wrapper za SDP API pozive
