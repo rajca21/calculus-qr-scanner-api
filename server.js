@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
@@ -11,9 +12,14 @@ import zohoRoutes from './routes/zoho.routes.js';
 import resendRoutes from './routes/resend.routes.js';
 
 const app = express();
-const port = process.env.PORT || 8000;
+// Pod IIS-om (AspNetCoreModuleV2, out-of-process) port se dodeljuje kroz ASPNETCORE_PORT
+// i mora imati prednost nad PORT iz .env-a
+const port = process.env.ASPNETCORE_PORT || process.env.PORT || 8000;
+const host =
+  process.env.HOST || (process.env.ASPNETCORE_PORT ? '127.0.0.1' : undefined);
 
-const uploadsDir = path.join(process.cwd(), 'uploads');
+const uploadsDir =
+  process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
 try {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
@@ -26,6 +32,8 @@ try {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/info', serverInfoRouter);
 app.use('/api/auth', authRouter);
@@ -54,6 +62,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => {
+app.listen(port, host, () => {
   console.log(`Server je pokrenut na portu ${port}`);
 });

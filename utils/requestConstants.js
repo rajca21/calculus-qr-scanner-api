@@ -1,6 +1,7 @@
 import https from 'https';
 
 export const wsUrl =
+  process.env.WS_URL ||
   'https://skenirajfiskal.calculus.rs/CWSFiskaliQR/CalculusWebService.asmx';
 
 // ## Header-i zahteva

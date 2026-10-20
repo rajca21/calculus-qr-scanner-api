@@ -462,7 +462,8 @@ export const createZohoRequest = async (req, res) => {
     const uploadErrors = [];
 
     if (attachments.length > 0) {
-      const uploadsDir = path.join(process.cwd(), 'uploads');
+      const uploadsDir =
+        process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
 
       if (!fsSync.existsSync(uploadsDir)) {
         fsSync.mkdirSync(uploadsDir, { recursive: true });
