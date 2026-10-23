@@ -10,6 +10,7 @@ import usersRouter from './routes/users.routes.js';
 import receiptsRouter from './routes/receipts.routes.js';
 import zohoRoutes from './routes/zoho.routes.js';
 import resendRoutes from './routes/resend.routes.js';
+import announcementsRouter from './routes/announcements.routes.js';
 
 const app = express();
 // Pod IIS-om (AspNetCoreModuleV2, out-of-process) port se dodeljuje kroz ASPNETCORE_PORT
@@ -41,6 +42,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/receipts', receiptsRouter);
 app.use('/api/zoho', zohoRoutes);
 app.use('/api/resend', resendRoutes);
+app.use('/api/announcements', announcementsRouter);
 
 app.use((req, res) => {
   return res.status(404).json({

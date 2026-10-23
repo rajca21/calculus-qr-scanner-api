@@ -98,6 +98,15 @@ GET | /:id | Vraćanje podataka o korisniku
 PUT | /:id/password | Promena lozinke korisnika
 PUT | /:id/profile | Promena podataka profila (kontakt)
 
+🔔 Obaveštenja (/api/announcements)
+Metoda | Ruta | Opis
+GET | /:userId | Obaveštenja vidljiva korisniku (globalna, po bazi i lična). Token se šalje u headeru `x-session-token`
+PUT | /:id/read | Označavanje obaveštenja kao pročitano (`{ userId, token, read }`, `read` je podrazumevano `true`)
+
+Obaveštenja se unose direktno u bazu: `WebQRScanObavestenje` (`Globalno = 'D'` za sve korisnike,
+`Prioritet >= 1` za popup u aplikaciji), `WebQRScanObavestenjeBaze` (svi korisnici jedne baze) i
+`WebQRScanObavestenjeKorisnika` (pojedinačni korisnik, čuva i status pročitanosti).
+
 ## ⚙️ Environment Varijable
 
 - PORT - port na kom se pokreće server na lokalu (pod IIS-om se ne postavlja)
