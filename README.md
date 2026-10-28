@@ -107,6 +107,47 @@ Obaveštenja se unose direktno u bazu: `WebQRScanObavestenje` (`Globalno = 'D'` 
 `Prioritet >= 1` za popup u aplikaciji), `WebQRScanObavestenjeBaze` (svi korisnici jedne baze) i
 `WebQRScanObavestenjeKorisnika` (pojedinačni korisnik, čuva i status pročitanosti).
 
+✉️ SendGrid (/api/sendgrid) - poziva se iz Calculus ERP-a
+Metoda | Ruta | Opis
+POST | /send | Slanje mejla preko SendGrid Web API-ja, sa SendGrid API ključem korisnika
+POST | /verify | Provera da je SendGrid API ključ ispravan i da ima dozvolu `mail.send` (ne šalje mejl)
+
+Obavezni headeri (ključevi se nikad ne šalju u telu ili URL-u, ne čuvaju se i ne loguju):
+
+- `X-Calculus-Client-Key` - ključ klijenta iz `ERP_CLIENT_KEYS`
+- `X-SendGrid-Api-Key` - SendGrid API ključ korisnika (preporuka: Restricted Access, samo Mail Send)
+- `Content-Type: application/json; charset=utf-8`
+
+Telo `/send` zahteva (prilozi su u istom formatu kao kod `/api/zoho/requests`):
+
+```json
+{
+  "from": "office@firma.rs",
+  "fromName": "Firma d.o.o.",
+  "to": "kupac@primer.rs; drugi@primer.rs",
+  "cc": ["knjigovodstvo@firma.rs"],
+  "bcc": "",
+  "replyTo": "prodaja@firma.rs",
+  "subject": "Faktura 123/2026",
+  "text": "Poštovani, u prilogu je faktura.",
+  "html": "<p>Poštovani, u prilogu je faktura.</p><img src=\"cid:logo\">",
+  "attachments": [
+    { "filename": "Faktura-123.pdf", "contentType": "application/pdf", "dataBase64": "JVBERi0..." },
+    { "filename": "logo.png", "contentType": "image/png", "dataBase64": "iVBOR...", "contentId": "logo" }
+  ]
+}
+```
+
+- `from` mora biti verifikovan pošiljalac (Sender Identity) na SendGrid nalogu korisnika
+- `to`, `cc`, `bcc` - niz ili string odvojen `,`/`;`; ukupno do 1000 adresa, duplikati se uklanjaju
+- `text` i/ili `html` (bar jedno); do 20 priloga, ukupno do 20 MB; prelomi reda u base64 su dozvoljeni
+- Odgovor je uvek ravan JSON: uspeh `{ "success": true, "code": "SENT", "messageId": "..." }`,
+  greška `{ "success": false, "code": "...", "error": "poruka za korisnika", "details": [...] }`
+- Kodovi grešaka: `CLIENT_UNAUTHORIZED` (401), `VALIDATION_ERROR`/`INVALID_JSON` (400), `UNSUPPORTED_MEDIA_TYPE` (415),
+  `PAYLOAD_TOO_LARGE` (413), `RATE_LIMITED` (429), `SENDGRID_KEY_REJECTED`/`SENDGRID_FORBIDDEN`/`SENDGRID_KEY_NO_MAIL_SEND` (403),
+  `SENDGRID_VALIDATION` (400), `SENDGRID_RATE_LIMITED` (429), `SENDGRID_TIMEOUT` (504), `SENDGRID_ERROR`/`SENDGRID_UNAVAILABLE` (502)
+- Ključ klijenta se generiše sa `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
+
 ## ⚙️ Environment Varijable
 
 - PORT - port na kom se pokreće server na lokalu (pod IIS-om se ne postavlja)
@@ -114,6 +155,8 @@ Obaveštenja se unose direktno u bazu: `WebQRScanObavestenje` (`Globalno = 'D'` 
 - NODEMAILER_PASSWORD - lozinka gore navedene email adrese
 - SUPPORT_MAIL - email adresa korisničke podrške na koju se šalje email o registraciji novog korisnika
 - ZOHO_BASE_URL, ZOHO_PORTAL_BASE_URL, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_SCOPE - Zoho SDP pristup
+- ERP_CLIENT_KEYS - ključevi Calculus ERP-a za /api/sendgrid (najmanje 32 karaktera, više odvojenih zarezom radi rotacije). Ako nije podešen, /api/sendgrid odbija sve zahteve
+- SENDGRID_RATE_LIMIT_PER_MINUTE (opciono) - broj zahteva ka /api/sendgrid po IP adresi u minuti (podrazumevano 60)
 - WS_URL (opciono) - adresa Calculus WS-a
 - UPLOADS_DIR (opciono) - folder za privremene fajlove
 
