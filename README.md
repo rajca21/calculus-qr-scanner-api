@@ -121,7 +121,8 @@ Obavezni headeri (ključevi se nikad ne šalju u telu ili URL-u, ne čuvaju se i
 
 - `X-Calculus-Client-Key` - ključ klijenta iz `ERP_CLIENT_KEYS`
 - `X-SendGrid-Api-Key` - SendGrid API ključ korisnika (preporuka: Restricted Access, samo Mail Send)
-- `Content-Type: application/json; charset=utf-8`
+- `Content-Type: application/json; charset=utf-8` ili `application/json; charset=windows-1250` (ANSI tekst iz PowerBuilder-a).
+  Bez navedenog charset-a telo mora biti UTF-8; neispravan UTF-8 se odbija kodom `INVALID_ENCODING` (400), kako slova č ć š đ ž ne bi stigla kao "�"
 
 Telo `/send` zahteva (prilozi su u istom formatu kao kod `/api/zoho/requests`):
 

@@ -63,7 +63,49 @@ router.use((req, res, next) => {
 });
 
 // 20 MB priloga u base64 zapisu je oko 27 MB, ostatak je za text/html
-router.use(express.json({ limit: '32mb' }));
+router.use(express.raw({ type: 'application/json', limit: '32mb' }));
+
+// Telo se dekodira eksplicitno: neispravan UTF-8 se odbija (umesto da slova postanu "�"),
+// a windows-1250 je podržan jer PowerBuilder na srpskom Windows-u šalje ANSI tekst u tom kodiranju
+router.use((req, res, next) => {
+  if (!Buffer.isBuffer(req.body)) return next();
+
+  const charset = (
+    String(req.get('content-type') || '').match(/;\s*charset\s*=\s*"?([\w-]+)"?/i)?.[1] || 'utf-8'
+  ).toLowerCase();
+  const encoding = { 'utf-8': 'utf-8', utf8: 'utf-8', 'windows-1250': 'windows-1250', cp1250: 'windows-1250' }[charset];
+
+  if (!encoding) {
+    return res.status(415).json({
+      success: false,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      error: 'Podržana kodiranja tela su utf-8 i windows-1250',
+    });
+  }
+
+  let text;
+  try {
+    text = new TextDecoder(encoding, { fatal: true }).decode(req.body);
+  } catch {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_ENCODING',
+      error:
+        'Telo zahteva nije ispravan UTF-8. Pošaljite tekst u UTF-8 kodiranju ili navedite Content-Type: application/json; charset=windows-1250',
+    });
+  }
+
+  try {
+    req.body = text.trim() ? JSON.parse(text) : {};
+  } catch {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_JSON',
+      error: 'Telo zahteva nije ispravan JSON',
+    });
+  }
+  return next();
+});
 
 router.post('/send', sendEmail);
 router.post('/verify', verifyApiKey);
@@ -87,11 +129,11 @@ router.use((err, req, res, next) => {
       error: 'Telo zahteva nije ispravan JSON',
     });
   }
-  if (err?.type === 'charset.unsupported' || err?.type === 'encoding.unsupported') {
+  if (err?.type === 'encoding.unsupported') {
     return res.status(415).json({
       success: false,
       code: 'UNSUPPORTED_MEDIA_TYPE',
-      error: 'Telo zahteva mora biti u UTF-8 kodiranju',
+      error: 'Content-Encoding zahteva nije podržan',
     });
   }
 
