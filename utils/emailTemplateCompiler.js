@@ -17,9 +17,11 @@ export const compileTemplate = async (templateName) => {
   );
   const templateFile = fs.readFileSync(templatePath, 'utf8');
 
-  const mjmlResult = mjml2html(templateFile);
+  const mjmlResult = await mjml2html(templateFile);
   if (mjmlResult.errors.length > 0) {
-    throw new Error(`MJML compilation errors: ${mjmlResult.errors.join(', ')}`);
+    throw new Error(
+      `MJML compilation errors: ${mjmlResult.errors.map((e) => e.formattedMessage).join(', ')}`
+    );
   }
 
   const template = handlebars.compile(mjmlResult.html);
