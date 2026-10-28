@@ -1,13 +1,24 @@
 import express from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import { requireClientKey } from '../utils/clientAuth.js';
 import { sendEmail, verifyApiKey } from '../controllers/sendgrid.controller.js';
 
 const router = express.Router();
 
+// IIS (ANCM) šalje X-Forwarded-For kao "ip:port", pa se port uklanja,
+// inače svaka konekcija dobija svoj limit
+const clientIp = (ip) => {
+  const value = String(ip || '');
+  const ipv6 = value.match(/^\[(.+)\]:\d+$/);
+  if (ipv6) return ipv6[1];
+  const ipv4 = value.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  return ipv4 ? ipv4[1] : value;
+};
+
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   limit: Number(process.env.SENDGRID_RATE_LIMIT_PER_MINUTE) || 60,
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req.ip)),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req, res) =>
