@@ -31,7 +31,7 @@ if (-not (Get-WebGlobalModule -Name AspNetCoreModuleV2 -ErrorAction SilentlyCont
 }
 
 $poolIdentity = "IIS AppPool\$SiteName"
-$dirs = 'releases', 'shared', 'shared\uploads', 'logs' | ForEach-Object { Join-Path $AppRoot $_ }
+$dirs = 'releases', 'shared', 'shared\uploads', 'shared\data', 'logs' | ForEach-Object { Join-Path $AppRoot $_ }
 
 foreach ($dir in @($AppRoot) + $dirs) {
   if (-not (Test-Path $dir) -and $PSCmdlet.ShouldProcess($dir, 'Create directory')) {
@@ -68,6 +68,7 @@ if ($PSCmdlet.ShouldProcess($AppRoot, 'Set ACLs')) {
   $shared = Join-Path $AppRoot 'shared'
   & icacls $shared /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' "${poolIdentity}:(OI)(CI)RX" | Out-Null
   & icacls (Join-Path $AppRoot 'shared\uploads') /grant "${poolIdentity}:(OI)(CI)M" | Out-Null
+  & icacls (Join-Path $AppRoot 'shared\data') /grant "${poolIdentity}:(OI)(CI)M" | Out-Null
   & icacls (Join-Path $AppRoot 'logs') /grant "${poolIdentity}:(OI)(CI)M" | Out-Null
   & icacls (Join-Path $AppRoot 'releases') /grant "${poolIdentity}:(OI)(CI)RX" | Out-Null
 }

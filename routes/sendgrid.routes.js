@@ -2,6 +2,12 @@ import express from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import { requireClientKey } from '../utils/clientAuth.js';
 import { sendEmail, verifyApiKey } from '../controllers/sendgrid.controller.js';
+import {
+  receiveEvents,
+  removeWebhook,
+  setupWebhook,
+} from '../controllers/sendgridWebhook.controller.js';
+import { getMessagesStatus } from '../controllers/sendgridStatus.controller.js';
 
 const router = express.Router();
 
@@ -15,19 +21,32 @@ const clientIp = (ip) => {
   return ipv4 ? ipv4[1] : value;
 };
 
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: Number(process.env.SENDGRID_RATE_LIMIT_PER_MINUTE) || 60,
-  keyGenerator: (req) => ipKeyGenerator(clientIp(req.ip)),
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  handler: (req, res) =>
-    res.status(429).json({
-      success: false,
-      code: 'RATE_LIMITED',
-      error: 'Previše zahteva, pokušajte ponovo za minut',
-    }),
-});
+const createLimiter = (limit) =>
+  rateLimit({
+    windowMs: 60 * 1000,
+    limit,
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req.ip)),
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (req, res) =>
+      res.status(429).json({
+        success: false,
+        code: 'RATE_LIMITED',
+        error: 'Previše zahteva, pokušajte ponovo za minut',
+      }),
+  });
+
+const limiter = createLimiter(Number(process.env.SENDGRID_RATE_LIMIT_PER_MINUTE) || 60);
+// SendGrid šalje događaje u serijama sa malog broja IP adresa, pa je limit veći
+const eventsLimiter = createLimiter(600);
+
+// SendGrid se autorizuje potpisom (ne ključem klijenta), a potpis se proverava nad sirovim telom
+router.post(
+  '/events/:accountId',
+  eventsLimiter,
+  express.raw({ type: () => true, limit: '5mb' }),
+  receiveEvents,
+);
 
 // Limit i provera klijenta idu pre parsiranja tela, kako neautorizovan zahtev ne bi parsirao do 32 MB
 router.use(limiter, requireClientKey);
@@ -48,6 +67,9 @@ router.use(express.json({ limit: '32mb' }));
 
 router.post('/send', sendEmail);
 router.post('/verify', verifyApiKey);
+router.post('/webhook/setup', setupWebhook);
+router.delete('/webhook', removeWebhook);
+router.post('/messages/status', getMessagesStatus);
 
 // Greške parsera se ne loguju, jer err.body sadrži ceo sadržaj mejla
 router.use((err, req, res, next) => {
@@ -55,7 +77,7 @@ router.use((err, req, res, next) => {
     return res.status(413).json({
       success: false,
       code: 'PAYLOAD_TOO_LARGE',
-      error: 'Zahtev je veći od dozvoljenih 32 MB',
+      error: 'Zahtev je veći od dozvoljene veličine',
     });
   }
   if (err?.type === 'entity.parse.failed') {

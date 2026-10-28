@@ -52,6 +52,7 @@ C:\Apps\CalculusQrScanner.Api\
   releases\     jedan folder po deployment-u (yyyyMMdd-HHmmss)
   shared\.env   tajne (van release-a, dostupno samo Administrators/SYSTEM/app pool)
   shared\uploads\
+  shared\data\  sendgrid.db (SQLite, SendGrid webhook događaji; app pool ima pravo upisa)
   logs\         stdout_*.log (izlaz node procesa)
 ```
 
@@ -110,7 +111,11 @@ Obaveštenja se unose direktno u bazu: `WebQRScanObavestenje` (`Globalno = 'D'` 
 ✉️ SendGrid (/api/sendgrid) - poziva se iz Calculus ERP-a
 Metoda | Ruta | Opis
 POST | /send | Slanje mejla preko SendGrid Web API-ja, sa SendGrid API ključem korisnika
-POST | /verify | Provera da je SendGrid API ključ ispravan i da ima dozvolu `mail.send` (ne šalje mejl)
+POST | /verify | Provera da je SendGrid API ključ ispravan i da ima dozvolu `mail.send` (ne šalje mejl). Vraća i `canReadActivity` i `canSetupWebhook`
+POST | /webhook/setup | Kreira potpisan Event Webhook na SendGrid nalogu korisnika i vraća `accountToken` (besplatni plan)
+DELETE | /webhook | Briše webhook sa SendGrid naloga i sve sačuvane događaje tog naloga
+POST | /messages/status | Status isporuke/otvaranja za do 50 mejlova (`{ "messageIds": ["..."] }`)
+POST | /events/:accountId | Prijem događaja od SendGrid-a (ne poziva se iz ERP-a; proverava se ECDSA potpis)
 
 Obavezni headeri (ključevi se nikad ne šalju u telu ili URL-u, ne čuvaju se i ne loguju):
 
@@ -147,6 +152,31 @@ Telo `/send` zahteva (prilozi su u istom formatu kao kod `/api/zoho/requests`):
   `PAYLOAD_TOO_LARGE` (413), `RATE_LIMITED` (429), `SENDGRID_KEY_REJECTED`/`SENDGRID_FORBIDDEN`/`SENDGRID_KEY_NO_MAIL_SEND` (403),
   `SENDGRID_VALIDATION` (400), `SENDGRID_RATE_LIMITED` (429), `SENDGRID_TIMEOUT` (504), `SENDGRID_ERROR`/`SENDGRID_UNAVAILABLE` (502)
 - Ključ klijenta se generiše sa `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
+- `trackOpens` / `trackClicks` (opciono, `true`/`false`) uključuju praćenje otvaranja/klikova za taj mejl; bez njih važe podešavanja SendGrid naloga.
+  Za status `OPENED` ERP treba da šalje `"trackOpens": true`
+
+Statusi mejlova (`/messages/status`) - dva izvora, isti odgovor:
+
+- **Plaćeni plan** (Email Activity History dodatak + dozvola Email Activity na ključu): zahtev bez account tokena, sa
+  `X-SendGrid-Api-Key`. Podaci se čitaju direktno iz SendGrid Email Activity API-ja (`source: "activity"`). Neuspešna isporuka je `NOT_DELIVERED`, bez razloga
+- **Svi planovi** (webhook): ERP jednom pozove `/webhook/setup` sa ključem koji ima Mail Send + Event Webhook (Full Access) i sačuva
+  dobijeni `accountToken` uz SendGrid ključ. Statusi se čitaju sa `X-SendGrid-Account-Token` (`source: "webhook"`), uz razlog za bounce/odbijanje.
+  Ponovni `/webhook/setup` sa istim tokenom zamenjuje webhook (npr. posle promene ključa). Događaji se čuvaju u
+  `shared\data\sendgrid.db` (SQLite) 30 dana (`SENDGRID_EVENTS_RETENTION_DAYS`), samo za mejlove poslate preko ovog API-ja
+
+```json
+{ "success": true, "code": "OK", "source": "webhook", "messages": [
+  { "messageId": "XhCSq6wyRDSbQEkhq4efFw", "status": "BOUNCED", "lastEventAt": "2026-10-28T16:40:06.000Z",
+    "opens": 1, "clicks": 0, "reason": "550 5.1.1 User unknown",
+    "recipients": [ { "email": "kupac@primer.rs", "status": "OPENED", "lastEventAt": "...", "reason": null },
+                    { "email": "drugi@primer.rs", "status": "BOUNCED", "lastEventAt": "...", "reason": "550 5.1.1 User unknown" } ] }
+] }
+```
+
+- `status` je najgori status među primaocima, od najgoreg ka najboljem: `BOUNCED`, `DROPPED`, `SPAM`, `NOT_DELIVERED`, `DEFERRED`,
+  `UNKNOWN` (još nema podataka), `SENT`, `DELIVERED`, `OPENED`, `CLICKED`. ERP upisuje `status` (i po želji `lastEventAt`) u svoju kolonu
+- `OPENED` je okviran podatak: Apple Mail Privacy Protection otvara mejlove automatski, a klijenti koji blokiraju slike ne javljaju otvaranje
+- Dodatni kodovi grešaka: `ACCOUNT_TOKEN_INVALID` (401), `WEBHOOK_NOT_CONFIGURED` (503)
 
 ## ⚙️ Environment Varijable
 
@@ -157,6 +187,9 @@ Telo `/send` zahteva (prilozi su u istom formatu kao kod `/api/zoho/requests`):
 - ZOHO_BASE_URL, ZOHO_PORTAL_BASE_URL, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_SCOPE - Zoho SDP pristup
 - ERP_CLIENT_KEYS - ključevi Calculus ERP-a za /api/sendgrid (najmanje 32 karaktera, više odvojenih zarezom radi rotacije). Ako nije podešen, /api/sendgrid odbija sve zahteve
 - SENDGRID_RATE_LIMIT_PER_MINUTE (opciono) - broj zahteva ka /api/sendgrid po IP adresi u minuti (podrazumevano 60)
+- PUBLIC_BASE_URL - javna https adresa API-ja na koju SendGrid šalje događaje (pod IIS-om u web.config)
+- DATA_DIR (opciono) - folder SQLite baze SendGrid događaja (podrazumevano ./data, pod IIS-om shared\data u web.config)
+- SENDGRID_EVENTS_RETENTION_DAYS (opciono) - broj dana čuvanja SendGrid događaja (podrazumevano 30)
 - WS_URL (opciono) - adresa Calculus WS-a
 - UPLOADS_DIR (opciono) - folder za privremene fajlove
 

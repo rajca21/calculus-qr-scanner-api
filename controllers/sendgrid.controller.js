@@ -4,6 +4,7 @@ import sgMail from '@sendgrid/mail';
 const { MailService } = sgMail;
 
 export const SENDGRID_KEY_HEADER = 'x-sendgrid-api-key';
+export const CUSTOM_ARG_MARKER = 'calculus_erp';
 
 const SENDGRID_TIMEOUT_MS = 30 * 1000;
 // SendGrid dozvoljava do 1000 primalaca (to + cc + bcc) i poruku do 30 MB
@@ -21,9 +22,9 @@ const MIME_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i;
 const CONTENT_ID_PATTERN = /^[A-Za-z0-9_.@-]{1,100}$/;
 const CONTROL_CHARS = /[\x00-\x1F\x7F]/;
 
-class ValidationError extends Error {}
+export class ValidationError extends Error {}
 
-const fail = (res, status, code, error, details) =>
+export const fail = (res, status, code, error, details) =>
   res.status(status).json({
     success: false,
     code,
@@ -32,7 +33,7 @@ const fail = (res, status, code, error, details) =>
   });
 
 // # Skraćeni otisak ključa za logove, kako bi se razlikovali korisnici bez otkrivanja ključa
-const fingerprint = (apiKey) =>
+export const fingerprint = (apiKey) =>
   crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 12);
 
 const singleLine = (value) =>
@@ -40,7 +41,7 @@ const singleLine = (value) =>
     .replace(/[\x00-\x1F\x7F]+/g, ' ')
     .trim();
 
-const getApiKey = (req) => {
+export const getApiKey = (req) => {
   const apiKey = String(req.get(SENDGRID_KEY_HEADER) || '').trim();
 
   if (!apiKey) {
@@ -56,7 +57,7 @@ const getApiKey = (req) => {
 };
 
 // # Nova instanca po zahtevu - podrazumevani export @sendgrid/mail deli jedan ključ za ceo proces
-const createMailService = (apiKey) => {
+export const createMailService = (apiKey) => {
   const service = new MailService();
   service.setApiKey(apiKey);
   service.client.setDefaultRequest({
@@ -221,6 +222,19 @@ const buildMessage = (body) => {
 
   const attachments = parseAttachments(body.attachments);
 
+  // Bez trackOpens/trackClicks važe podešavanja SendGrid naloga korisnika
+  const trackingSettings = {};
+  for (const [field, setting] of [
+    ['trackOpens', 'openTracking'],
+    ['trackClicks', 'clickTracking'],
+  ]) {
+    if (body[field] === undefined || body[field] === null) continue;
+    if (typeof body[field] !== 'boolean') {
+      throw new ValidationError(`${field} mora biti true ili false`);
+    }
+    trackingSettings[setting] = { enable: body[field] };
+  }
+
   return {
     from: fromName ? { email: from, name: fromName } : from,
     to,
@@ -231,12 +245,21 @@ const buildMessage = (body) => {
     ...(text ? { text } : {}),
     ...(html ? { html } : {}),
     ...(attachments.length ? { attachments } : {}),
+    ...(Object.keys(trackingSettings).length ? { trackingSettings } : {}),
+    // Webhook čuva samo događaje mejlova poslatih preko ovog API-ja
+    customArgs: { [CUSTOM_ARG_MARKER]: '1' },
   };
 };
 
 // # Prevođenje SendGrid greške u odgovor; sirova greška se nikad ne loguje,
 // # jer axios greška u config.headers nosi Authorization (API ključ korisnika)
-const handleSendGridError = (res, error, action, keyFingerprint) => {
+export const handleSendGridError = (
+  res,
+  error,
+  action,
+  keyFingerprint,
+  forbiddenMessage,
+) => {
   const status = typeof error?.code === 'number' ? error.code : null;
 
   if (status && error.response) {
@@ -253,9 +276,11 @@ const handleSendGridError = (res, error, action, keyFingerprint) => {
     if (status === 401) {
       return fail(res, 403, 'SENDGRID_KEY_REJECTED', 'SendGrid je odbio API ključ (neispravan, obrisan ili onemogućen)', details);
     }
-    if (status === 403) return fail(res, 403, 'SENDGRID_FORBIDDEN', message, details);
+    if (status === 403) {
+      return fail(res, 403, 'SENDGRID_FORBIDDEN', forbiddenMessage || message, details);
+    }
     if (status === 413) return fail(res, 413, 'SENDGRID_PAYLOAD_TOO_LARGE', message, details);
-    if (status === 429) return fail(res, 429, 'SENDGRID_RATE_LIMITED', 'Dostignut je limit slanja na SendGrid nalogu', details);
+    if (status === 429) return fail(res, 429, 'SENDGRID_RATE_LIMITED', 'Dostignut je limit zahteva na SendGrid nalogu', details);
     if (status >= 400 && status < 500) return fail(res, 400, 'SENDGRID_VALIDATION', message, details);
     return fail(res, 502, 'SENDGRID_ERROR', message, details);
   }
@@ -291,6 +316,8 @@ const handleSendGridError = (res, error, action, keyFingerprint) => {
  * @param   {string} req.body.attachments[].contentType - MIME tip fajla (opciono)
  * @param   {string} req.body.attachments[].dataBase64 - Base64 sadržaj fajla
  * @param   {string} req.body.attachments[].contentId - Za slike ugrađene u HTML (opciono)
+ * @param   {boolean} req.body.trackOpens - Praćenje otvaranja (opciono, inače podešavanje naloga)
+ * @param   {boolean} req.body.trackClicks - Praćenje klikova (opciono, inače podešavanje naloga)
  */
 export const sendEmail = async (req, res) => {
   let apiKey;
@@ -336,7 +363,8 @@ export const sendEmail = async (req, res) => {
 
 /**
  * @route   POST /api/sendgrid/verify
- * @desc    Provera da je SendGrid API ključ ispravan i da ima dozvolu za slanje (mail.send)
+ * @desc    Provera da je SendGrid API ključ ispravan i da ima dozvolu za slanje (mail.send),
+ *          uz informaciju da li može da čita Email Activity i da podesi webhook
  * @header  {string} X-Calculus-Client-Key - Ključ klijenta (Calculus ERP)
  * @header  {string} X-SendGrid-Api-Key - SendGrid API ključ korisnika
  */
@@ -370,7 +398,16 @@ export const verifyApiKey = async (req, res) => {
       );
     }
 
-    return res.status(200).json({ success: true, code: 'KEY_VALID', canSend: true });
+    // Activity API dodatno zahteva plaćeni Email Activity History dodatak, što se vidi tek pri pozivu
+    return res.status(200).json({
+      success: true,
+      code: 'KEY_VALID',
+      canSend: true,
+      canReadActivity: scopes.includes('messages.read'),
+      canSetupWebhook:
+        scopes.includes('user.webhooks.event.settings.read') &&
+        scopes.includes('user.webhooks.event.settings.update'),
+    });
   } catch (error) {
     return handleSendGridError(res, error, 'Provera ključa', keyFingerprint);
   }
